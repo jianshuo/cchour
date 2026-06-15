@@ -1,6 +1,6 @@
 {
   "name": "cchour",
-  "version": "1.7.1",
+  "version": "1.8.0",
   "description": "See how much time you actually spend in AI coding tools (Claude Code / Codex) — generates a local HTML report from session logs",
   "bin": {
     "cchour": "bin/cchour.js"

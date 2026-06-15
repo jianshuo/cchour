@@ -1,14 +1,39 @@
 # STATE — cchour 项目状态
 
-## 当前状态（迭代 10 完成，2026-06-11）
+## 当前状态（迭代 11 完成，2026-06-15）
 
-Node.js 零依赖 CLI，**v1.7.0（本地，待 publish）**：
+Node.js 零依赖 CLI，**v1.8.0（本地，待 publish）**：
 
 - 代码：`bin/cchour.js`（单文件，零依赖，Node ≥ 18）
 - GitHub：https://github.com/jianshuo/cchour （public，main）
-- npm：**cchour@1.1.0 已发布**；1.2.0–1.7.0 均未发布——publish 卡 2FA，
-  需用户在项目目录跑 `npm publish --access public --otp=<验证码>`（直接发 1.7.0 即可）
+- npm：**cchour@1.1.0 已发布**；1.2.0–1.8.0 均未发布——publish 卡 2FA，
+  需用户在项目目录跑 `npm publish --access public --otp=<验证码>`（直接发 1.8.0 即可）
+- 迭代 11 改动：英文支持 + 按系统语言自动切换（详见下节）
 - 迭代 10 改动：HTML 报表内交互式时间范围选择器（详见下节）
+
+## 英文支持 / 按系统语言切换（迭代 11 引入）
+
+- `detectLang(argv)`：优先级 `--lang zh|en` > `CCHOUR_LANG` 环境变量 >
+  `LC_ALL`/`LC_MESSAGES`/`LANG`（`C`/`POSIX` 跳过）> macOS `defaults read -g AppleLocale`
+  > 默认 en。`/^zh/i` → zh，否则 en。本机 LANG=zh_CN（且 AppleLocale=zh_CN）→ 仍中文，
+  迭代 10 行为完全不变。
+- 翻译目录 `T = { zh, en }`（模块级 `let L = T[lang]`，CLI 单次运行用模块变量即可）：
+  覆盖 CLI 帮助 / 进度 / 全部错误信息 + HTML 静态骨架（title、html lang 属性、chip、
+  分节标题、footer、sub 行、clip 提示）。客户端字符串打包进内嵌 JSON 的 `t` 字段，
+  前端 JS 一律走 `D.t.*`（不再硬编码「小时」「天」「占比」「日均」「最近」「统计范围」等）。
+- **数据层不动**：项目/分类的内部规范名仍是中文（categories.json 规则、匹配逻辑零改动），
+  `--json` 输出稳定不随语言变（已验证 zh/en 两次 --json 除 generatedAt 外完全一致）。
+- 仅在**展示层**翻译：`localizeCat`（CAT_I18N，内置 6 类 + 「其他」中→英）、
+  `localizeProj`（合成名按 ` · ` 拆 base/cat 分别翻；BASE_I18N 覆盖 code 根目录/home/根目录/
+  临时目录/iCloud 文档 的带/不带「（杂项）」两种形式）。在 buildEmbedData 里对嵌入 JSON 的
+  cat/proj 翻译，真实项目名（多为英文）和用户自定义分类名（如「产品开发」）原样保留。
+- `--lang` 在 parseArgs 里消费其值（不报未知参数），写进 help；`html lang` 随语言切换。
+- **坑/注意**：① 客户端 i18n 字符串走 `D.t`，不能在服务端模板里用反引号（同迭代 10 约束）；
+  ② 用户个人 categories.json 的自定义分类名不翻译（无法穷举），属预期——公开包内置分类才有英文。
+- 验证：默认（zh_CN）报表与迭代 10 完全一致（231h 总 / Claude 217h / Codex 13.9h，中文）；
+  `--lang en` / `CCHOUR_LANG=en`：CLI 全英文、HTML 全英文（chip/卡片/分类/footer/项目名）、
+  点「Last month」就地重算 range-label=「Range 2026-05-01 ~ 2026-05-31」total=118h；
+  中英两版 console 均无错误；6 类错误信息中英各一份；`--json` 语言无关。
 - 迭代 9 改动：`--week` / `--month` 周报月报快捷范围
 - 迭代 8 改动：`--since` / `--until` 日期过滤
 - 迭代 7 改动：① `--json` 输出模式；② 内容级分类改为扫描前 3 条用户消息——杂项 **22% → 18%**

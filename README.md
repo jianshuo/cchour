@@ -47,6 +47,8 @@ cchour --month last       # last full month — instant monthly report
 cchour --month 2026-05    # a specific month
 cchour --json             # print report data as JSON to stdout
 cchour --json -o out.json # ...or write it to a file
+cchour --lang en          # force English UI (default follows system locale)
+cchour --lang zh          # force Chinese UI
 ```
 
 `--since` / `--until` filter events by local-time date before any stats are
@@ -80,6 +82,16 @@ totals, and per-project rows (`tool`, `project`, `seconds`, `category`,
 ```bash
 cchour --json | jq '.tools["Claude Code"].hours'
 ```
+
+### Language
+
+The CLI and the HTML report are bilingual (English / 简体中文). The language is
+chosen automatically from your system locale: `--lang` takes priority, then the
+`CCHOUR_LANG` environment variable, then `LC_ALL` / `LC_MESSAGES` / `LANG`, and on
+macOS the system region (`AppleLocale`). A `zh*` locale renders Chinese; anything
+else renders English. Only the UI is translated — `--json` output keeps stable
+(language-independent) field values, and your own category names from
+`~/.cchour/categories.json` stay in whatever language you wrote them.
 
 ## Data sources
 

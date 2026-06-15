@@ -1,5 +1,15 @@
 # TODO — cchour AI 编程工具时间报表
 
+# TODO 迭代 11（2026-06-15）— 英文支持 + 按系统语言自动切换
+
+- [x] 1. 语言检测 `detectLang(argv)`：优先 `--lang zh|en`，其次 `CCHOUR_LANG`，再次环境变量 `LC_ALL`/`LC_MESSAGES`/`LANG`，macOS 兜底读 `defaults read -g AppleLocale`；命中 `zh*` → zh，否则 en。本机 LANG=zh_CN → 仍走中文，行为不变。
+- [x] 2. 翻译目录 `T = { zh, en }`：覆盖 CLI 帮助 / 进度 / 错误信息，以及 HTML 静态骨架；客户端字符串打包进内嵌 JSON 的 `t` 字段，前端 JS 走 `D.t.*`。
+- [x] 3. 数据层不动（`--json` 已验证 zh/en 除 generatedAt 外完全一致）；展示层 `localizeCat` + `localizeProj`（按 ` · ` 拆 base/cat 分别翻），在 buildEmbedData 翻译嵌入 cat/proj。
+- [x] 4. `--lang` 进 parseArgs（消费值、不报未知参数）+ 写进 help；`html lang` 随语言切换。
+- [x] 5. 本地验证：默认 zh_CN 与迭代 10 完全一致（231h/217h/13.9h）；`--lang en` 全英文、点 Last month 就地重算（Range 2026-05-01~05-31, 118h）；中英 console 均无错误；`--json` 语言无关。
+- [x] 6. 版本 bump 1.8.0，README 补语言切换说明，commit + push。
+- [x] 7. 更新 STATE.md / TODO.md（标记全部完成）。
+
 # TODO 迭代 10（2026-06-11）— HTML 报表内交互式时间范围选择器
 
 - [x] 1. buildReport 增加可嵌入的按日数据：每工具 daily + dayHour（天×24 小时）、每项目 daily（分类由项目行在前端聚合得出，嵌入 JSON 仅 16KB）

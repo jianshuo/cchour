@@ -30,6 +30,200 @@ const GAP = 900; // 相邻事件最大间隔（秒）：15 分钟以内算持续
 const MIN_EVENT = 30; // 孤立事件的最小计时（秒）
 const CHUNK = 4 * 1024 * 1024;
 
+// ---- i18n ----------------------------------------------------------------
+// 语言只影响展示层（CLI 文案 + HTML 报表）。数据层的项目/分类规范名保持中文，
+// --json 输出稳定不随语言变；HTML 里用下面的映射在展示时翻译。
+const { execFileSync } = require('child_process');
+
+function resolveLang(s) {
+  return s && /^zh/i.test(String(s).trim()) ? 'zh' : 'en';
+}
+
+// 检测显示语言：--lang > CCHOUR_LANG > LC_ALL/LC_MESSAGES/LANG > macOS AppleLocale > en
+function detectLang(argv) {
+  const idx = argv.indexOf('--lang');
+  if (idx >= 0 && argv[idx + 1]) return resolveLang(argv[idx + 1]);
+  if (process.env.CCHOUR_LANG) return resolveLang(process.env.CCHOUR_LANG);
+  const env = process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG;
+  if (env && env !== 'C' && env !== 'POSIX') return resolveLang(env);
+  if (process.platform === 'darwin') {
+    try {
+      const out = execFileSync('defaults', ['read', '-g', 'AppleLocale'], {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      if (out) return resolveLang(out);
+    } catch { /* 读不到就走默认 */ }
+  }
+  return 'en';
+}
+
+// 内置分类名 / 特殊目录派生名的中→英映射（仅 en 展示时使用，匹配逻辑仍按中文规范名）
+const CAT_I18N = {
+  '写作与发布': 'Writing & Publishing',
+  '视频制作': 'Video Production',
+  '网站维护': 'Website Maintenance',
+  '技能与工具链': 'Skills & Tooling',
+  '杂项（根目录会话）': 'Misc (root sessions)',
+  '基础设施': 'Infrastructure',
+  '其他': 'Other',
+};
+const BASE_I18N = {
+  'code 根目录（杂项）': 'code root (misc)',
+  'home 目录（杂项）': 'home (misc)',
+  '根目录（杂项）': 'root (misc)',
+  '临时目录': 'temp dir',
+  'iCloud 文档': 'iCloud Docs',
+  'code 根目录': 'code root',
+  'home 目录': 'home',
+  '根目录': 'root',
+};
+
+function localizeCat(cat, lang) {
+  return lang === 'zh' ? cat : (CAT_I18N[cat] || cat);
+}
+
+// 项目名：合成名形如「<base> · <分类>」，按 ` · ` 拆开分别翻；真实项目名（多为英文）原样保留
+function localizeProj(proj, lang) {
+  if (lang === 'zh') return proj;
+  const sep = ' · ';
+  const i = proj.indexOf(sep);
+  if (i >= 0) {
+    const base = proj.slice(0, i);
+    const cat = proj.slice(i + sep.length);
+    return (BASE_I18N[base] || base) + sep + (CAT_I18N[cat] || cat);
+  }
+  return BASE_I18N[proj] || proj;
+}
+
+const T = {
+  zh: {
+    htmlLang: 'zh-CN',
+    title: 'AI 编程工具时间报表',
+    genAt: '生成于',
+    subTail: '数据来自本机 Claude Code 与 Codex 会话记录 · 活跃时长 = 相邻操作间隔 ≤ 15 分钟的累计',
+    clip: (s, u) => ` · 数据已按命令行参数截取 ${s} ~ ${u}`,
+    clipEarliest: '最早',
+    clipToday: '今天',
+    chips: { all: '全部', today: '今天', week: '本周', lastweek: '上周', month: '本月', lastmonth: '上月', d7: '近 7 天', d30: '近 30 天', d90: '近 90 天' },
+    custom: '自定义',
+    hHourly: '一天中的时间分布（24 小时）',
+    hCats: '工作分类',
+    hProjects: '项目时长 Top 20',
+    footer: 'cchour · 全部数据在本机统计，未上传任何服务 · 时间范围切换在浏览器内完成',
+    // 注入前端的字符串
+    t: {
+      hour: '小时', minute: '分钟',
+      total: '总活跃时长', days: '天', share: '占比', dailyAvg: '日均',
+      rangePrefix: '统计范围', rangeAll: '全部数据', earliest: '最早', today: '今天',
+      dailyHead: ['最近 ', ' 天每日使用'],
+      weeklyHead: ['最近 ', ' 周每周使用（以周一为起点）'],
+      monthlyHead: ['最近 ', ' 个月每月使用'],
+      noData: '该时间段没有数据', last: '最近',
+    },
+    // CLI
+    scanning: '扫描数据源…',
+    projEvents: (tool, p, n) => `  ${tool}: ${p} 个项目, ${n} 个事件`,
+    toolHours: (t, h) => `  ${t}: ${h} 小时`,
+    generated: (p, s) => `已生成 ${p}（耗时 ${s} 秒）`,
+    elapsed: (s) => `耗时 ${s} 秒`,
+    errDate: (name, s) => `${name} 需要 YYYY-MM-DD 格式的日期，收到: ${s}`,
+    errWeekMonth: '--week 与 --month 不能同时使用',
+    errRangeConflict: (f) => `--${f} 不能与 --since/--until 同时使用`,
+    errMonthFmt: (m) => `--month 需要 last 或 YYYY-MM 格式，收到: ${m}`,
+    errFuture: (f) => `--${f} 指定的范围在未来，没有数据`,
+    errSinceUntil: '--since 不能晚于 --until',
+    errNoOutput: '缺少 --output 的值',
+    errUnknown: (a) => `未知参数: ${a}\n`,
+    help: `cchour v${pkg.version} — AI 编程工具时间报表 (Claude Code / Codex)
+
+用法: cchour [选项]
+
+选项:
+  -o, --output <文件>   输出 HTML 路径（默认 ./cchour-report.html）
+      --days <N>        每日图表显示最近 N 天（默认 30）
+      --since <日期>    只统计该日期（含）之后的活动，格式 YYYY-MM-DD
+      --until <日期>    只统计该日期（含当天整天）之前的活动，格式 YYYY-MM-DD
+      --week [W]        周报快捷范围：不带值=本周（周一起到今天）；last=上一整周；
+                        YYYY-MM-DD=该日期所在的周（周一 ~ 周日，不超过今天）
+      --month [M]       月报快捷范围：不带值=本月；last=上个整月；YYYY-MM=指定月
+      --lang <zh|en>    界面语言（默认跟随系统区域设置；也可用 CCHOUR_LANG 环境变量）
+      --open            生成后用系统默认浏览器打开
+      --json            输出 JSON 而非 HTML（默认打到 stdout，配 -o 则写文件）
+  -h, --help            显示帮助
+  -v, --version         显示版本
+
+分类规则可用 ~/.cchour/categories.json 自定义，格式:
+  [["分类名", ["项目名关键词", ...], ["内容关键词", ...]?], ...]
+按顺序对项目名做小写包含匹配，未命中归入「其他」。
+可选的第三个数组用于杂项目录（home / code 根目录等）会话的内容级分类:
+匹配会话首条用户消息，命中则把该会话挪进对应分类。`,
+  },
+  en: {
+    htmlLang: 'en',
+    title: 'AI Coding Tool Time Report',
+    genAt: 'Generated',
+    subTail: 'Data from local Claude Code & Codex session logs · Active time = sum of gaps ≤ 15 min between consecutive actions',
+    clip: (s, u) => ` · clipped by CLI args to ${s} ~ ${u}`,
+    clipEarliest: 'earliest',
+    clipToday: 'today',
+    chips: { all: 'All', today: 'Today', week: 'This week', lastweek: 'Last week', month: 'This month', lastmonth: 'Last month', d7: 'Last 7 days', d30: 'Last 30 days', d90: 'Last 90 days' },
+    custom: 'Custom',
+    hHourly: 'Time of day (24 hours)',
+    hCats: 'Work categories',
+    hProjects: 'Top 20 projects by time',
+    footer: 'cchour · All stats computed locally, nothing uploaded · Range switching happens in your browser',
+    t: {
+      hour: 'h', minute: 'min',
+      total: 'Total active time', days: 'days', share: 'share', dailyAvg: 'daily avg',
+      rangePrefix: 'Range', rangeAll: 'all data', earliest: 'earliest', today: 'today',
+      dailyHead: ['Last ', ' days — daily usage'],
+      weeklyHead: ['Last ', ' weeks — weekly usage (weeks start Monday)'],
+      monthlyHead: ['Last ', ' months — monthly usage'],
+      noData: 'No data in this range', last: 'last',
+    },
+    scanning: 'Scanning data sources…',
+    projEvents: (tool, p, n) => `  ${tool}: ${p} projects, ${n} events`,
+    toolHours: (t, h) => `  ${t}: ${h} h`,
+    generated: (p, s) => `Generated ${p} (${s}s)`,
+    elapsed: (s) => `Done in ${s}s`,
+    errDate: (name, s) => `${name} expects a YYYY-MM-DD date, got: ${s}`,
+    errWeekMonth: '--week and --month cannot be used together',
+    errRangeConflict: (f) => `--${f} cannot be combined with --since/--until`,
+    errMonthFmt: (m) => `--month expects last or YYYY-MM, got: ${m}`,
+    errFuture: (f) => `--${f} range is in the future, no data`,
+    errSinceUntil: '--since cannot be later than --until',
+    errNoOutput: 'missing value for --output',
+    errUnknown: (a) => `unknown argument: ${a}\n`,
+    help: `cchour v${pkg.version} — AI coding tool time report (Claude Code / Codex)
+
+Usage: cchour [options]
+
+Options:
+  -o, --output <file>   output HTML path (default ./cchour-report.html)
+      --days <N>        show the last N days in the daily chart (default 30)
+      --since <date>    only count activity on/after this date, format YYYY-MM-DD
+      --until <date>    only count activity on/before this date (whole day), YYYY-MM-DD
+      --week [W]        weekly range: no value = this week (Mon..today); last = last full week;
+                        YYYY-MM-DD = the week containing that date (Mon..Sun, capped at today)
+      --month [M]       monthly range: no value = this month; last = last full month; YYYY-MM = that month
+      --lang <zh|en>    UI language (defaults to system locale; or set CCHOUR_LANG env var)
+      --open            open the report in your default browser after generating
+      --json            output JSON instead of HTML (to stdout by default, or to a file with -o)
+  -h, --help            show this help
+  -v, --version         show version
+
+Categories can be customized via ~/.cchour/categories.json, format:
+  [["Category", ["project-name keyword", ...], ["content keyword", ...]?], ...]
+Project names are matched (lowercase substring) in order; unmatched go to "Other".
+The optional third array does content-level classification for misc directories
+(home / code root, etc.): it matches the first user messages of a session and,
+on a hit, moves that session into the matching category.`,
+  },
+};
+
+// 当前界面语言文案（在 main 里按检测结果设定，CLI 单次运行用模块级变量即可）
+let L = T.en;
+
 // Claude Code 把会话 cwd 里的 / 和 . 都替换成 - 作为目录名
 const FH = HOME.replace(/[/.]/g, '-');
 
@@ -442,7 +636,7 @@ function buildReport(data, categorize, catOverride, ndays, range = {}) {
 // 页面里切换时间范围时就地重算所有数字。秒数取整以减小体积。
 // 语义：按「日桶归属」求和（增量记到后一事件所在天），选「全部」与 CLI 总数完全一致，
 // 子范围与 CLI --since/--until 仅在跨午夜的会话边界处有分钟级差异。
-function buildEmbedData({ toolSeconds, toolDaily, toolDayHour, projRows, range, daysOpt }) {
+function buildEmbedData({ toolSeconds, toolDaily, toolDayHour, projRows, range, daysOpt }, lang) {
   const round = (m) => {
     const o = {};
     for (const [k, v] of Array.from(m.entries()).sort()) o[k] = Math.round(v);
@@ -470,25 +664,31 @@ function buildEmbedData({ toolSeconds, toolDaily, toolDayHour, projRows, range, 
     daysOpt,
     range,
     tools,
-    projects: projRows.map((r) => ({ tool: r.tool, proj: r.proj, cat: r.cat, daily: round(r.daily) })),
+    t: T[lang].t,
+    projects: projRows.map((r) => ({
+      tool: r.tool,
+      proj: localizeProj(r.proj, lang),
+      cat: localizeCat(r.cat, lang),
+      daily: round(r.daily),
+    })),
   };
 }
 
-function renderHtml(report) {
-  const embed = buildEmbedData(report);
+function renderHtml(report, lang) {
+  const embed = buildEmbedData(report, lang);
   // </script> 防注入：JSON 里的 < 转义后再嵌入
   const json = JSON.stringify(embed).replace(/</g, '\\u003c');
   const r = report.range;
   const clipNote = r && (r.since || r.until)
-    ? ` · 数据已按命令行参数截取 ${r.since || '最早'} ~ ${r.until || '今天'}`
+    ? L.clip(r.since || L.clipEarliest, r.until || L.clipToday)
     : '';
 
   return `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${L.htmlLang}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI 编程工具时间报表</title>
+<title>${L.title}</title>
 <style>
   :root { --ink:#2c2c2c; --muted:#8a8a8a; --line:#ececec; --bg:#fafaf8; --card:#ffffff; }
   * { box-sizing:border-box; margin:0; padding:0; }
@@ -536,20 +736,20 @@ function renderHtml(report) {
 </head>
 <body>
 <div class="wrap">
-  <h1>AI 编程工具时间报表</h1>
-  <div class="sub">生成于 ${embed.genTime} · <span id="range-label"></span>${clipNote} · 数据来自本机 Claude Code 与 Codex 会话记录 · 活跃时长 = 相邻操作间隔 ≤ 15 分钟的累计</div>
+  <h1>${L.title}</h1>
+  <div class="sub">${L.genAt} ${embed.genTime} · <span id="range-label"></span>${clipNote} · ${L.subTail}</div>
 
   <div class="controls">
-    <button class="chip" data-preset="all">全部</button>
-    <button class="chip" data-preset="today">今天</button>
-    <button class="chip" data-preset="week">本周</button>
-    <button class="chip" data-preset="lastweek">上周</button>
-    <button class="chip" data-preset="month">本月</button>
-    <button class="chip" data-preset="lastmonth">上月</button>
-    <button class="chip" data-preset="d7">近 7 天</button>
-    <button class="chip" data-preset="d30">近 30 天</button>
-    <button class="chip" data-preset="d90">近 90 天</button>
-    <span class="custom">自定义 <input type="date" id="d-since"> ~ <input type="date" id="d-until"></span>
+    <button class="chip" data-preset="all">${L.chips.all}</button>
+    <button class="chip" data-preset="today">${L.chips.today}</button>
+    <button class="chip" data-preset="week">${L.chips.week}</button>
+    <button class="chip" data-preset="lastweek">${L.chips.lastweek}</button>
+    <button class="chip" data-preset="month">${L.chips.month}</button>
+    <button class="chip" data-preset="lastmonth">${L.chips.lastmonth}</button>
+    <button class="chip" data-preset="d7">${L.chips.d7}</button>
+    <button class="chip" data-preset="d30">${L.chips.d30}</button>
+    <button class="chip" data-preset="d90">${L.chips.d90}</button>
+    <span class="custom">${L.custom} <input type="date" id="d-since"> ~ <input type="date" id="d-until"></span>
   </div>
 
   <div class="cards" id="cards"></div>
@@ -572,19 +772,19 @@ function renderHtml(report) {
     <div class="legend" id="legend-monthly"></div>
   </div>
 
-  <h2>一天中的时间分布（24 小时）</h2>
+  <h2>${L.hHourly}</h2>
   <div class="panel hourchart">
     <div class="chart" id="chart-hourly" style="height:150px"></div>
     <div class="legend" id="legend-hourly"></div>
   </div>
 
-  <h2>工作分类</h2>
+  <h2>${L.hCats}</h2>
   <div class="panel" id="cats"></div>
 
-  <h2>项目时长 Top 20</h2>
+  <h2>${L.hProjects}</h2>
   <div class="panel" id="projects"></div>
 
-  <footer>cchour · 全部数据在本机统计，未上传任何服务 · 时间范围切换在浏览器内完成</footer>
+  <footer>${L.footer}</footer>
 </div>
 
 <script type="application/json" id="cchour-data">${json}</script>
@@ -598,7 +798,7 @@ var TOOLS = Object.keys(D.tools);
 
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
 function hrs(sec) { var h = sec / 3600; return h >= 100 ? h.toFixed(0) : h.toFixed(1); }
-function fmtH(sec) { var h = sec / 3600; return h >= 1 ? h.toFixed(1) + ' 小时' : Math.round(sec / 60) + ' 分钟'; }
+function fmtH(sec) { var h = sec / 3600; return h >= 1 ? h.toFixed(1) + ' ' + D.t.hour : Math.round(sec / 60) + ' ' + D.t.minute; }
 function color(t) { return TOOL_COLORS[t] || '#888'; }
 function dayStr(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
 function parseDay(s) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
@@ -643,17 +843,17 @@ function render() {
   var spanDays = Math.max(1, Math.round((parseDay(end) - parseDay(start)) / 86400000) + 1);
 
   document.getElementById('range-label').textContent =
-    (lo || hi) ? '统计范围 ' + (lo || '最早') + ' ~ ' + (hi || '今天') : '统计范围 全部数据';
+    (lo || hi) ? D.t.rangePrefix + ' ' + (lo || D.t.earliest) + ' ~ ' + (hi || D.t.today) : D.t.rangePrefix + ' ' + D.t.rangeAll;
 
   // 总览卡片
-  var cards = '<div class="card"><div class="card-label">总活跃时长</div>' +
-    '<div class="card-value">' + hrs(total) + '<span class="unit">小时</span></div>' +
-    '<div class="card-sub">' + start + ' ~ ' + end + ' · ' + spanDays + ' 天</div></div>';
+  var cards = '<div class="card"><div class="card-label">' + D.t.total + '</div>' +
+    '<div class="card-value">' + hrs(total) + '<span class="unit">' + D.t.hour + '</span></div>' +
+    '<div class="card-sub">' + start + ' ~ ' + end + ' · ' + spanDays + ' ' + D.t.days + '</div></div>';
   tools.forEach(function (t) {
     var pct = total ? (toolSec[t] / total) * 100 : 0;
     cards += '<div class="card"><div class="card-label"><span class="dot" style="background:' + color(t) + '"></span>' + t + '</div>' +
-      '<div class="card-value">' + hrs(toolSec[t]) + '<span class="unit">小时</span></div>' +
-      '<div class="card-sub">占比 ' + pct.toFixed(0) + '% · 日均 ' + (toolSec[t] / 3600 / spanDays).toFixed(1) + ' 小时</div></div>';
+      '<div class="card-value">' + hrs(toolSec[t]) + '<span class="unit">' + D.t.hour + '</span></div>' +
+      '<div class="card-sub">' + D.t.share + ' ' + pct.toFixed(0) + '% · ' + D.t.dailyAvg + ' ' + (toolSec[t] / 3600 / spanDays).toFixed(1) + ' ' + D.t.hour + '</div></div>';
   });
   document.getElementById('cards').innerHTML = cards;
 
@@ -672,7 +872,7 @@ function render() {
     if (ds < start) continue;
     days.push(ds);
   }
-  document.getElementById('h-daily').textContent = '最近 ' + days.length + ' 天每日使用';
+  document.getElementById('h-daily').textContent = D.t.dailyHead[0] + days.length + D.t.dailyHead[1];
   document.getElementById('chart-daily').innerHTML = stackedBars(days, tools, function (t, k) {
     return D.tools[t].daily[k] || 0;
   }, function (k) { return k.slice(5).replace('-', '/'); }, 160);
@@ -697,7 +897,7 @@ function render() {
     if (wkk < startWeek) continue;
     weeks.push(wkk);
   }
-  document.getElementById('h-weekly').textContent = '最近 ' + weeks.length + ' 周每周使用（以周一为起点）';
+  document.getElementById('h-weekly').textContent = D.t.weeklyHead[0] + weeks.length + D.t.weeklyHead[1];
   document.getElementById('chart-weekly').innerHTML = stackedBars(weeks, tools, function (t, k) {
     return wkByTool[t][k] || 0;
   }, function (k) { return k.slice(5).replace('-', '/'); }, 150);
@@ -709,7 +909,7 @@ function render() {
     if (mk2 < startMonth) continue;
     months.push(mk2);
   }
-  document.getElementById('h-monthly').textContent = '最近 ' + months.length + ' 个月每月使用';
+  document.getElementById('h-monthly').textContent = D.t.monthlyHead[0] + months.length + D.t.monthlyHead[1];
   document.getElementById('chart-monthly').innerHTML = stackedBars(months, tools, function (t, k) {
     return moByTool[t][k] || 0;
   }, function (k) { return k.slice(2).replace('-', '/'); }, 150);
@@ -748,7 +948,7 @@ function render() {
       '<div class="htrack"><div class="hfill" style="width:' + pct.toFixed(1) + '%;background:' + col + '"></div></div>' +
       '<div class="hval">' + fmtH(catSec[c]) + ' · ' + pct.toFixed(0) + '%</div></div>';
   });
-  document.getElementById('cats').innerHTML = catRows || '<div class="muted" style="font-size:13px">该时间段没有数据</div>';
+  document.getElementById('cats').innerHTML = catRows || '<div class="muted" style="font-size:13px">' + D.t.noData + '</div>';
 
   // Top 项目
   var rows = [];
@@ -767,9 +967,9 @@ function render() {
     var pct = (r.sec / maxProj) * 100;
     projHtml += '<div class="hrow"><div class="hname" title="' + r.proj + '">' + r.proj + '</div>' +
       '<div class="htrack"><div class="hfill" style="width:' + pct.toFixed(1) + '%;background:' + color(r.tool) + '"></div></div>' +
-      '<div class="hval">' + fmtH(r.sec) + ' <span class="muted">· ' + r.cat + ' · 最近 ' + r.last.slice(5) + '</span></div></div>';
+      '<div class="hval">' + fmtH(r.sec) + ' <span class="muted">· ' + r.cat + ' · ' + D.t.last + ' ' + r.last.slice(5) + '</span></div></div>';
   });
-  document.getElementById('projects').innerHTML = projHtml || '<div class="muted" style="font-size:13px">该时间段没有数据</div>';
+  document.getElementById('projects').innerHTML = projHtml || '<div class="muted" style="font-size:13px">' + D.t.noData + '</div>';
 }
 
 function presetRange(name) {
@@ -855,28 +1055,7 @@ function renderJson({ toolSeconds, toolDaily, toolWeekly, toolMonthly, toolHourl
 }
 
 function printHelp() {
-  console.log(`cchour v${pkg.version} — AI 编程工具时间报表 (Claude Code / Codex)
-
-用法: cchour [选项]
-
-选项:
-  -o, --output <文件>   输出 HTML 路径（默认 ./cchour-report.html）
-      --days <N>        每日图表显示最近 N 天（默认 30）
-      --since <日期>    只统计该日期（含）之后的活动，格式 YYYY-MM-DD
-      --until <日期>    只统计该日期（含当天整天）之前的活动，格式 YYYY-MM-DD
-      --week [W]        周报快捷范围：不带值=本周（周一起到今天）；last=上一整周；
-                        YYYY-MM-DD=该日期所在的周（周一 ~ 周日，不超过今天）
-      --month [M]       月报快捷范围：不带值=本月；last=上个整月；YYYY-MM=指定月
-      --open            生成后用系统默认浏览器打开
-      --json            输出 JSON 而非 HTML（默认打到 stdout，配 -o 则写文件）
-  -h, --help            显示帮助
-  -v, --version         显示版本
-
-分类规则可用 ~/.cchour/categories.json 自定义，格式:
-  [["分类名", ["项目名关键词", ...], ["内容关键词", ...]?], ...]
-按顺序对项目名做小写包含匹配，未命中归入「其他」。
-可选的第三个数组用于杂项目录（home / code 根目录等）会话的内容级分类:
-匹配会话首条用户消息，命中则把该会话挪进对应分类。`);
+  console.log(L.help);
 }
 
 function parseDayArg(name, s) {
@@ -885,7 +1064,7 @@ function parseDayArg(name, s) {
   // new Date 会把 2026-13-99 这类值自动进位，回验分量拦住
   if (d && (d.getFullYear() !== +m[1] || d.getMonth() !== +m[2] - 1 || d.getDate() !== +m[3])) d = null;
   if (!d || isNaN(d.getTime())) {
-    console.error(`${name} 需要 YYYY-MM-DD 格式的日期，收到: ${s}`);
+    console.error(L.errDate(name, s));
     process.exit(1);
   }
   return d;
@@ -895,11 +1074,11 @@ function parseDayArg(name, s) {
 function expandShortcutRange(opts) {
   if (!opts.week && !opts.month) return;
   if (opts.week && opts.month) {
-    console.error('--week 与 --month 不能同时使用');
+    console.error(L.errWeekMonth);
     process.exit(1);
   }
   if (opts.since || opts.until) {
-    console.error(`--${opts.week ? 'week' : 'month'} 不能与 --since/--until 同时使用`);
+    console.error(L.errRangeConflict(opts.week ? 'week' : 'month'));
     process.exit(1);
   }
   const now = new Date();
@@ -920,7 +1099,7 @@ function expandShortcutRange(opts) {
     else {
       const m = /^(\d{4})-(\d{2})$/.exec(opts.month);
       if (!m || +m[2] < 1 || +m[2] > 12) {
-        console.error(`--month 需要 last 或 YYYY-MM 格式，收到: ${opts.month}`);
+        console.error(L.errMonthFmt(opts.month));
         process.exit(1);
       }
       y = +m[1];
@@ -930,7 +1109,7 @@ function expandShortcutRange(opts) {
     until = new Date(y, mo + 1, 0);
   }
   if (since > today) {
-    console.error(`--${opts.week ? 'week' : 'month'} 指定的范围在未来，没有数据`);
+    console.error(L.errFuture(opts.week ? 'week' : 'month'));
     process.exit(1);
   }
   if (until > today) until = today;
@@ -954,6 +1133,8 @@ function parseArgs(argv) {
     else if (a === '--week' || a === '--month') {
       const next = argv[i + 1];
       opts[a.slice(2)] = next && !next.startsWith('-') ? argv[++i] : true;
+    } else if (a === '--lang') {
+      i++; // 语言已在 detectLang 里解析，这里只消费它的值
     } else if (a === '--open') opts.open = true;
     else if (a === '--json') opts.json = true;
     else if (a === '-h' || a === '--help') {
@@ -963,28 +1144,31 @@ function parseArgs(argv) {
       console.log(pkg.version);
       process.exit(0);
     } else {
-      console.error(`未知参数: ${a}\n`);
+      console.error(L.errUnknown(a));
       printHelp();
       process.exit(1);
     }
   }
   if (!opts.output) {
-    console.error('缺少 --output 的值');
+    console.error(L.errNoOutput);
     process.exit(1);
   }
   expandShortcutRange(opts);
   if (opts.since && opts.until && opts.since > opts.until) {
-    console.error('--since 不能晚于 --until');
+    console.error(L.errSinceUntil);
     process.exit(1);
   }
   return opts;
 }
 
 function main() {
-  const opts = parseArgs(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const lang = detectLang(argv);
+  L = T[lang];
+  const opts = parseArgs(argv);
   const t0 = Date.now();
 
-  console.error('扫描数据源…');
+  console.error(L.scanning);
   const rules = loadCategories();
   const { data, catOverride } = collect(makeContentCategorize(rules));
 
@@ -1004,7 +1188,7 @@ function main() {
   for (const [tool, projects] of data) {
     let n = 0;
     for (const ts of projects.values()) n += ts.length;
-    console.error(`  ${tool}: ${projects.size} 个项目, ${n} 个事件`);
+    console.error(L.projEvents(tool, projects.size, n));
   }
 
   const report = buildReport(data, makeCategorize(rules), catOverride, opts.days, {
@@ -1012,25 +1196,25 @@ function main() {
   });
 
   const sorted = Array.from(report.toolSeconds.entries()).sort((a, b) => b[1] - a[1]);
-  for (const [t, s] of sorted) console.error(`  ${t}: ${(s / 3600).toFixed(1)} 小时`);
+  for (const [t, s] of sorted) console.error(L.toolHours(t, (s / 3600).toFixed(1)));
 
   if (opts.json) {
     const json = renderJson(report);
     if (opts.outputSet) {
       const outPath = path.resolve(opts.output);
       fs.writeFileSync(outPath, json + '\n', 'utf8');
-      console.error(`已生成 ${outPath}（耗时 ${((Date.now() - t0) / 1000).toFixed(1)} 秒）`);
+      console.error(L.generated(outPath, ((Date.now() - t0) / 1000).toFixed(1)));
     } else {
       console.log(json);
-      console.error(`耗时 ${((Date.now() - t0) / 1000).toFixed(1)} 秒`);
+      console.error(L.elapsed(((Date.now() - t0) / 1000).toFixed(1)));
     }
     return;
   }
 
-  const html = renderHtml(report);
+  const html = renderHtml(report, lang);
   const outPath = path.resolve(opts.output);
   fs.writeFileSync(outPath, html, 'utf8');
-  console.error(`已生成 ${outPath}（耗时 ${((Date.now() - t0) / 1000).toFixed(1)} 秒）`);
+  console.error(L.generated(outPath, ((Date.now() - t0) / 1000).toFixed(1)));
 
   if (opts.open) {
     const opener =
